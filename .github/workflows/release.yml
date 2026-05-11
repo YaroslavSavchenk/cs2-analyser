@@ -91,38 +91,39 @@ jobs:
           set -euo pipefail
           mkdir -p release-artefacts
           bundle_root="src-tauri/target/release/bundle"
-          # Copy every artefact we want to publish. Globs may match nothing on
-          # some Tauri configs (e.g. NSIS disabled) so each copy is best-effort.
+          # Tauri 2.x with bundle.createUpdaterArtifacts: true produces the
+          # NSIS updater archive (.nsis.zip) on Windows; the MSI is shipped
+          # as a one-time installer only, no .msi.zip. Globs are best-effort.
           shopt -s nullglob
           for f in \
             "$bundle_root"/msi/*.msi \
-            "$bundle_root"/msi/*.msi.zip \
-            "$bundle_root"/msi/*.msi.zip.sig \
             "$bundle_root"/nsis/*.exe \
             "$bundle_root"/nsis/*.nsis.zip \
             "$bundle_root"/nsis/*.nsis.zip.sig ; do
             cp "$f" release-artefacts/
           done
+          echo "--- release-artefacts/ ---"
           ls -la release-artefacts/
-          # Locate the signed MSI zip and its signature for the updater manifest.
-          msi_zip=$(ls release-artefacts/*.msi.zip 2>/dev/null | head -n1 || true)
-          msi_sig=$(ls release-artefacts/*.msi.zip.sig 2>/dev/null | head -n1 || true)
-          msi_zip_name=$(basename "$msi_zip" 2>/dev/null || echo "")
-          echo "msi_zip_path=$msi_zip" >> "$GITHUB_OUTPUT"
-          echo "msi_sig_path=$msi_sig" >> "$GITHUB_OUTPUT"
-          echo "msi_zip_name=$msi_zip_name" >> "$GITHUB_OUTPUT"
+          # The updater consumes the signed NSIS zip + its .sig.
+          nsis_zip=$(ls release-artefacts/*.nsis.zip 2>/dev/null | head -n1 || true)
+          nsis_sig=$(ls release-artefacts/*.nsis.zip.sig 2>/dev/null | head -n1 || true)
+          nsis_zip_name=$(basename "$nsis_zip" 2>/dev/null || echo "")
+          echo "updater_archive_path=$nsis_zip" >> "$GITHUB_OUTPUT"
+          echo "updater_sig_path=$nsis_sig" >> "$GITHUB_OUTPUT"
+          echo "updater_archive_name=$nsis_zip_name" >> "$GITHUB_OUTPUT"
 
       - name: Generate updater manifest (latest.json)
         shell: bash
         env:
           RELEASE_TAG: ${{ steps.tag.outputs.value }}
           REPO: ${{ github.repository }}
-          MSI_ZIP_NAME: ${{ steps.collect.outputs.msi_zip_name }}
-          MSI_SIG_PATH: ${{ steps.collect.outputs.msi_sig_path }}
+          UPDATER_ARCHIVE_NAME: ${{ steps.collect.outputs.updater_archive_name }}
+          UPDATER_SIG_PATH: ${{ steps.collect.outputs.updater_sig_path }}
         run: |
           set -euo pipefail
-          if [ -z "$MSI_ZIP_NAME" ] || [ -z "$MSI_SIG_PATH" ]; then
-            echo "ERROR: signed MSI zip or its .sig was not produced by tauri build" >&2
+          if [ -z "$UPDATER_ARCHIVE_NAME" ] || [ -z "$UPDATER_SIG_PATH" ]; then
+            echo "ERROR: NSIS updater archive (.nsis.zip) or its .sig was not produced by tauri build." >&2
+            echo "Confirm bundle.createUpdaterArtifacts is true in tauri config." >&2
             exit 1
           fi
           node - <<'NODE'
@@ -131,13 +132,13 @@ jobs:
 
           const tag = process.env.RELEASE_TAG;
           const repo = process.env.REPO;
-          const msiZipName = process.env.MSI_ZIP_NAME;
-          const msiSigPath = process.env.MSI_SIG_PATH;
+          const archiveName = process.env.UPDATER_ARCHIVE_NAME;
+          const sigPath = process.env.UPDATER_SIG_PATH;
 
-          const signature = fs.readFileSync(msiSigPath, 'utf8').trim();
+          const signature = fs.readFileSync(sigPath, 'utf8').trim();
           const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
           const version = tag || `v${pkg.version}`;
-          const url = `https://github.com/${repo}/releases/download/${tag}/${msiZipName}`;
+          const url = `https://github.com/${repo}/releases/download/${tag}/${encodeURIComponent(archiveName)}`;
 
           const manifest = {
             version,
@@ -155,6 +156,7 @@ jobs:
             path.join('release-artefacts', 'latest.json'),
             JSON.stringify(manifest, null, 2) + '\n',
           );
+          console.log('manifest written for', version, '->', archiveName);
           NODE
 
       - name: Publish GitHub Release
@@ -167,8 +169,6 @@ jobs:
           fail_on_unmatched_files: true
           files: |
             release-artefacts/*.msi
-            release-artefacts/*.msi.zip
-            release-artefacts/*.msi.zip.sig
             release-artefacts/*.exe
             release-artefacts/*.nsis.zip
             release-artefacts/*.nsis.zip.sig
