@@ -82,6 +82,14 @@ The Rust orchestrator and Python sidecar communicate over **stdin/stdout with li
 - **State management:** start with built-in React hooks. Add Zustand only when prop drilling becomes painful — not preemptively.
 - **Package manager:** `pnpm` (not npm, not yarn).
 
+### Dev environment on WSL2
+
+The developer's machine is Windows 11 + WSL2 Ubuntu 24.04. Tauri's Linux build needs these apt packages once (see README "Linux / WSL2 system packages" for the full command):
+
+`libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev libssl-dev libsoup-3.0-dev libdbus-1-dev libxdo-dev pkg-config build-essential`
+
+If a fresh `pnpm tauri dev` fails on `libdbus-sys`, `webkit2gtk-sys`, or `pkg-config not found`, that's because the apt packages haven't been installed. The shipped Windows MSI never touches these — CI builds on `windows-latest`.
+
 ### Design — CS2 visual language
 
 - **Production-grade visual quality.** Avoid the generic AI default look (no blue-purple gradients, no rounded-blob hero illustrations).

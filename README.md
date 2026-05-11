@@ -90,6 +90,28 @@ CS2-themed dark UI. Charcoal/navy backgrounds, orange-gold accent for primary ac
 - **Python** — 3.11+ (3.12 tested).
 - **Tauri 2.x platform prerequisites** — see the [Tauri prerequisites guide](https://tauri.app/start/prerequisites/).
 
+### Linux / WSL2 system packages
+
+If you're developing on Linux or in WSL2 on Windows 11, install Tauri 2.x's native build prerequisites once:
+
+```bash
+sudo apt update && sudo apt install -y \
+  libwebkit2gtk-4.1-dev \
+  libgtk-3-dev \
+  librsvg2-dev \
+  libayatana-appindicator3-dev \
+  libssl-dev \
+  libsoup-3.0-dev \
+  libdbus-1-dev \
+  libxdo-dev \
+  pkg-config \
+  build-essential
+```
+
+On Windows 11 WSL2, the dev window renders directly on the Windows desktop via WSLg with GPU acceleration — no extra display setup is needed. The shipped MSI is always built on a `windows-latest` runner in CI (`.github/workflows/release.yml`); the WSL/Linux build is purely for dev iteration.
+
+The first `pnpm tauri dev` after a fresh clone compiles ~600 Rust crates and takes 5–10 minutes. Subsequent rebuilds use the incremental cache and finish in seconds.
+
 ### First-time setup
 
 ```bash
