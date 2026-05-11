@@ -125,7 +125,9 @@ pub async fn spawn_analyzer(
         ));
     }
 
-    let mut command = Command::new("python3");
+    let python = resolve_python_interpreter();
+    debug!(job_id = %job_id, python = %python.display(), "spawning analyzer");
+    let mut command = Command::new(python);
     command
         .arg("analyzer/main.py")
         .arg("--job-id")
@@ -303,6 +305,25 @@ fn emit_terminal_error(app: &AppHandle, job_id: &str, kind: &str, message: &str)
     if let Err(e) = app.emit("analysis:error", &payload) {
         error!(job_id = %job_id, error = %e, "failed to emit analysis:error");
     }
+}
+
+// In dev, prefer the project-local analyzer/.venv interpreter if it exists -
+// PEP 668 on Ubuntu 24.04 makes system-wide pip installs awkward, and the
+// release.yml CI runner doesn't reach this code path anyway.
+fn resolve_python_interpreter() -> std::path::PathBuf {
+    use std::path::PathBuf;
+    let candidates = [
+        "analyzer/.venv/bin/python3",
+        "analyzer/.venv/bin/python",
+        "analyzer/.venv/Scripts/python.exe",
+    ];
+    for path in candidates {
+        let pb = PathBuf::from(path);
+        if pb.exists() {
+            return pb;
+        }
+    }
+    PathBuf::from("python3")
 }
 
 pub async fn cancel(app: &AppHandle, job_id: &str) -> Result<()> {

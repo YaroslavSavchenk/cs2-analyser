@@ -118,12 +118,12 @@ The first `pnpm tauri dev` after a fresh clone compiles ~600 Rust crates and tak
 # Frontend deps
 pnpm install
 
-# Python analyzer deps (in a venv)
-cd analyzer
-python3 -m venv .venv
-source .venv/bin/activate    # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-cd ..
+# Python analyzer deps (in a venv at analyzer/.venv)
+# The Rust orchestrator auto-detects this venv at runtime - no need to
+# `source` it before running the app.
+python3 -m venv analyzer/.venv
+analyzer/.venv/bin/pip install -r analyzer/requirements.txt
+# Windows: analyzer\.venv\Scripts\pip install -r analyzer\requirements.txt
 ```
 
 ### Run in development
