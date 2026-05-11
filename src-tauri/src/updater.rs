@@ -66,4 +66,5 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
 
     info!("update installed; restarting");
     app.restart();
+    // unreachable: AppHandle::restart() returns ! - it replaces the process.
 }

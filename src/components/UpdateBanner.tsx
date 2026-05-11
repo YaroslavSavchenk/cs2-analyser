@@ -10,6 +10,7 @@ export function UpdateBanner() {
   const [info, setInfo] = useState<UpdateCheckResult>({ available: false });
   const [open, setOpen] = useState(false);
   const [installing, setInstalling] = useState(false);
+  const [installError, setInstallError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -29,9 +30,14 @@ export function UpdateBanner() {
 
   const onInstall = async () => {
     setInstalling(true);
+    setInstallError(null);
     try {
       await installUpdate();
-    } finally {
+      // On success the Rust side replaces the process via app.restart(),
+      // so this promise never resolves. No setInstalling(false) needed.
+    } catch (e) {
+      console.error("install_update failed", e);
+      setInstallError(e instanceof Error ? e.message : String(e));
       setInstalling(false);
     }
   };
@@ -100,6 +106,17 @@ export function UpdateBanner() {
               {info.notes || "No release notes provided."}
             </div>
           </div>
+          {installError && (
+            <div
+              className={cn(
+                "px-4 py-2 text-[11px] border-t border-cs-border",
+                "text-cs-danger bg-cs-danger/5 font-mono",
+              )}
+              role="alert"
+            >
+              Install failed: {installError}
+            </div>
+          )}
           <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-cs-border">
             <Dialog.Close asChild>
               <Button variant="ghost" size="sm">
