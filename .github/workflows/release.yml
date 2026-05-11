@@ -36,7 +36,7 @@ jobs:
           ref: ${{ steps.tag.outputs.value }}
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 10
 
