@@ -2,7 +2,9 @@ import type { HTMLAttributes, ReactNode } from "react";
 import { cn } from "../../lib/utils";
 
 type CardProps = HTMLAttributes<HTMLDivElement> & {
+  /** Adds a 2px orange stripe along the top edge. */
   accent?: boolean;
+  /** Adds tournament-style 4-corner brackets. */
   corners?: boolean;
   children?: ReactNode;
 };
@@ -17,18 +19,19 @@ export function Card({
   return (
     <div
       className={cn(
-        "relative border border-cs-border bg-cs-charcoal-2/80 rounded-cs-md",
-        accent && "border-t-cs-orange border-t-[2px]",
+        "relative border border-cs-border bg-cs-charcoal-2/85 rounded-none",
+        accent && "border-t-[2px] border-t-cs-orange",
+        corners && "hud-bracket-4",
         className,
       )}
       {...props}
     >
       {corners ? (
         <>
-          <span className="cs-corner-tl" />
-          <span className="cs-corner-tr" />
-          <span className="cs-corner-bl" />
-          <span className="cs-corner-br" />
+          <span className="b-tl" />
+          <span className="b-tr" />
+          <span className="b-bl" />
+          <span className="b-br" />
         </>
       ) : null}
       {children}
@@ -44,7 +47,7 @@ export function CardHeader({
   return (
     <div
       className={cn(
-        "flex items-center justify-between gap-3 px-4 py-3 border-b border-cs-border",
+        "flex items-center justify-between gap-3 px-4 h-10 border-b border-cs-border",
         className,
       )}
       {...props}
@@ -62,7 +65,7 @@ export function CardTitle({
   return (
     <div
       className={cn(
-        "font-mono text-[11px] uppercase tracking-[0.18em] text-cs-text-dim",
+        "font-mono text-[10px] uppercase tracking-[0.22em] text-cs-text-dim font-bold",
         className,
       )}
       {...props}

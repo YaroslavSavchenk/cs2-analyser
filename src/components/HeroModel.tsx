@@ -290,17 +290,31 @@ export function HeroModel({ className }: HeroModelProps) {
       <Canvas
         dpr={[1, 1.6]}
         gl={{ antialias: true, alpha: true, powerPreference: "low-power" }}
-        camera={{ position: [2.3, 1.1, 3.8], fov: 32 }}
+        camera={{ position: [1.85, 1.2, 4.2], fov: 28 }}
         onCreated={({ gl }) => {
           gl.setClearColor(0x000000, 0);
         }}
         onError={() => setWebglOk(false)}
       >
-        <fog attach="fog" args={["#0d0e10", 4.5, 9]} />
-        <ambientLight intensity={0.35} color="#5e98d9" />
-        <directionalLight position={[-3, 2.5, 2.5]} intensity={0.4} color="#ffffff" />
-        <directionalLight position={[3, 3, -2]} intensity={1.2} color="#fe6e2c" />
-        <pointLight position={[1.5, 0.5, 2]} intensity={0.6} color="#f5a623" />
+        {/* deeper, moodier fog — proscenium feel */}
+        <fog attach="fog" args={["#06080a", 4.0, 8.5]} />
+        {/* cool fill from camera-left (CT blue tint) */}
+        <ambientLight intensity={0.28} color="#6aa8ff" />
+        <directionalLight
+          position={[-3.2, 2.2, 2.8]}
+          intensity={0.55}
+          color="#9bc3ff"
+        />
+        {/* warm rim key from camera-right (orange) */}
+        <directionalLight
+          position={[3.4, 3.2, -1.4]}
+          intensity={1.5}
+          color="#ff6b1f"
+        />
+        {/* low warm bounce */}
+        <pointLight position={[1.2, 0.2, 2.0]} intensity={0.5} color="#ffb938" />
+        {/* hard backlight to lift silhouette off background */}
+        <pointLight position={[-1.0, 1.6, -3.0]} intensity={0.4} color="#9bc3ff" />
         <Operator />
       </Canvas>
     </div>

@@ -7,6 +7,10 @@ type ProgressProps = ComponentProps<typeof ProgressPrimitive.Root> & {
   indeterminate?: boolean;
 };
 
+/**
+ * Broadcast-style segmented progress bar. Sharp corners, orange glow, and
+ * a thin scan-line overlay during active runs.
+ */
 export function Progress({
   className,
   value,
@@ -19,7 +23,7 @@ export function Progress({
       value={indeterminate ? undefined : pct}
       max={100}
       className={cn(
-        "relative h-1.5 w-full overflow-hidden rounded-cs",
+        "relative h-2 w-full overflow-hidden rounded-none",
         "bg-cs-charcoal-3 border border-cs-border",
         className,
       )}
@@ -27,18 +31,34 @@ export function Progress({
     >
       <ProgressPrimitive.Indicator
         className={cn(
-          "h-full transition-[width] duration-300 ease-out",
-          "bg-cs-orange",
-          indeterminate && "w-1/3 cs-shimmer",
+          "relative h-full transition-[width] duration-300 ease-out",
+          "bg-gradient-to-r from-cs-orange-dim via-cs-orange to-cs-orange-bright",
+          indeterminate && "w-1/3 hud-shimmer",
         )}
         style={
           indeterminate
             ? undefined
             : {
                 width: `${pct}%`,
-                boxShadow: "0 0 12px rgba(254,110,44,0.45)",
+                boxShadow:
+                  "0 0 16px rgba(255,107,31,0.55), inset 0 -1px 0 0 rgba(0,0,0,0.35)",
               }
         }
+      >
+        {/* trailing edge highlight */}
+        <span
+          aria-hidden
+          className="absolute top-0 right-0 h-full w-px bg-cs-orange-bright/90"
+        />
+      </ProgressPrimitive.Indicator>
+      {/* faint scan overlay */}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+        style={{
+          backgroundImage:
+            "repeating-linear-gradient(90deg, rgba(0,0,0,0.18) 0 1px, transparent 1px 6px)",
+        }}
       />
     </ProgressPrimitive.Root>
   );
