@@ -112,11 +112,17 @@ pub async fn spawn_analyzer(
     demo_path: String,
     mode: String,
 ) -> Result<()> {
-    // v0.1: dev mode only. Production sidecar wiring is a TODO once the
-    // PyInstaller-bundled analyzer binary exists.
-    if !cfg!(debug_assertions) {
-        // TODO(prod): swap to tauri_plugin_shell sidecar binary `analyzer`.
-        warn!("production sidecar path not implemented; falling back to python3");
+    // v0.1: dev mode only. Production sidecar wiring lands in v0.1.1 with
+    // the PyInstaller-bundled analyzer binary and tauri-plugin-shell's
+    // scoped sidecar API. Fail fast in release builds instead of silently
+    // spawning python3 (which won't exist on most Windows installs).
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = (&app, &demo_path, &mode); // suppress unused warnings
+        return Err(anyhow!(
+            "production sidecar not yet wired for job {job_id} \
+             (PyInstaller binary path TODO; ships in v0.1.1)"
+        ));
     }
 
     let mut command = Command::new("python3");
