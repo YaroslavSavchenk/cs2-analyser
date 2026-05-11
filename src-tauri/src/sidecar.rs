@@ -112,24 +112,9 @@ pub async fn spawn_analyzer(
     demo_path: String,
     mode: String,
 ) -> Result<()> {
-    // v0.1: dev mode only. Production sidecar wiring lands in v0.1.1 with
-    // the PyInstaller-bundled analyzer binary and tauri-plugin-shell's
-    // scoped sidecar API. Fail fast in release builds instead of silently
-    // spawning python3 (which won't exist on most Windows installs).
-    #[cfg(not(debug_assertions))]
-    {
-        let _ = (&app, &demo_path, &mode); // suppress unused warnings
-        return Err(anyhow!(
-            "production sidecar not yet wired for job {job_id} \
-             (PyInstaller binary path TODO; ships in v0.1.1)"
-        ));
-    }
-
-    let python = resolve_python_interpreter();
-    debug!(job_id = %job_id, python = %python.display(), "spawning analyzer");
-    let mut command = Command::new(python);
+    let mut command = build_analyzer_command()
+        .with_context(|| format!("failed to build analyzer command for job {job_id}"))?;
     command
-        .arg("analyzer/main.py")
         .arg("--job-id")
         .arg(&job_id)
         .arg("--mode")
@@ -142,7 +127,7 @@ pub async fn spawn_analyzer(
 
     let mut child = command
         .spawn()
-        .with_context(|| format!("failed to spawn python3 analyzer for job {job_id}"))?;
+        .with_context(|| format!("failed to spawn analyzer for job {job_id}"))?;
 
     let stdout = child
         .stdout
@@ -307,9 +292,57 @@ fn emit_terminal_error(app: &AppHandle, job_id: &str, kind: &str, message: &str)
     }
 }
 
-// In dev, prefer the project-local analyzer/.venv interpreter if it exists -
-// PEP 668 on Ubuntu 24.04 makes system-wide pip installs awkward, and the
-// release.yml CI runner doesn't reach this code path anyway.
+// Dev builds spawn python3 + analyzer/main.py. Release builds spawn the
+// PyInstaller-bundled binary that Tauri ships alongside the main exe via
+// bundle.externalBin in tauri.conf.json.
+#[cfg(debug_assertions)]
+fn build_analyzer_command() -> Result<Command> {
+    let python = resolve_python_interpreter();
+    debug!(python = %python.display(), "spawning analyzer (dev: python3 + script)");
+    let mut c = Command::new(python);
+    c.arg("analyzer/main.py");
+    Ok(c)
+}
+
+#[cfg(not(debug_assertions))]
+fn build_analyzer_command() -> Result<Command> {
+    let path = find_bundled_sidecar()?;
+    debug!(sidecar = %path.display(), "spawning analyzer (release: bundled binary)");
+    Ok(Command::new(path))
+}
+
+#[cfg(not(debug_assertions))]
+fn find_bundled_sidecar() -> Result<std::path::PathBuf> {
+    let exe_dir = std::env::current_exe()
+        .context("could not resolve current exe path")?
+        .parent()
+        .ok_or_else(|| anyhow!("current exe has no parent directory"))?
+        .to_path_buf();
+    // Tauri's externalBin convention places the binary next to the main exe.
+    // The build-time name carries the target triple (set by release.yml).
+    // Different Tauri versions either preserve or strip the triple suffix
+    // in the bundled output, so we look for both forms.
+    let candidates: &[&str] = if cfg!(target_os = "windows") {
+        &["analyzer.exe", "analyzer-x86_64-pc-windows-msvc.exe"]
+    } else {
+        &["analyzer", "analyzer-x86_64-unknown-linux-gnu"]
+    };
+    for name in candidates {
+        let path = exe_dir.join(name);
+        if path.exists() {
+            return Ok(path);
+        }
+    }
+    Err(anyhow!(
+        "bundled analyzer sidecar not found in {}; tried: {:?}",
+        exe_dir.display(),
+        candidates
+    ))
+}
+
+// Dev-only: prefer the project-local analyzer/.venv interpreter if it exists -
+// PEP 668 on Ubuntu 24.04 makes system-wide pip installs awkward.
+#[cfg(debug_assertions)]
 fn resolve_python_interpreter() -> std::path::PathBuf {
     use std::path::PathBuf;
     let candidates = [
