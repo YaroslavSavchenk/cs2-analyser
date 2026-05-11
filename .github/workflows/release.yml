@@ -1,0 +1,175 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build and publish (e.g. v0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows MSI and publish release
+    runs-on: windows-latest
+
+    steps:
+      - name: Resolve release tag
+        id: tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "value=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.value }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Setup Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo (src-tauri)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: analyzer/requirements.txt
+
+      - name: Install Python analyzer dependencies
+        run: |
+          pip install -r analyzer/requirements.txt
+          pip install "pyinstaller>=6.3.0"
+
+      - name: Ensure sidecar output directory exists
+        shell: bash
+        run: mkdir -p src-tauri/binaries
+
+      - name: Build Python analyzer as Tauri sidecar
+        run: pyinstaller --onefile --name analyzer-x86_64-pc-windows-msvc --distpath src-tauri/binaries analyzer/main.py
+
+      - name: Build Tauri app (MSI + NSIS + updater artefacts)
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm tauri build
+
+      - name: Collect release artefacts
+        id: collect
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.tag.outputs.value }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-artefacts
+          bundle_root="src-tauri/target/release/bundle"
+          # Copy every artefact we want to publish. Globs may match nothing on
+          # some Tauri configs (e.g. NSIS disabled) so each copy is best-effort.
+          shopt -s nullglob
+          for f in \
+            "$bundle_root"/msi/*.msi \
+            "$bundle_root"/msi/*.msi.zip \
+            "$bundle_root"/msi/*.msi.zip.sig \
+            "$bundle_root"/nsis/*.exe \
+            "$bundle_root"/nsis/*.nsis.zip \
+            "$bundle_root"/nsis/*.nsis.zip.sig ; do
+            cp "$f" release-artefacts/
+          done
+          ls -la release-artefacts/
+          # Locate the signed MSI zip and its signature for the updater manifest.
+          msi_zip=$(ls release-artefacts/*.msi.zip 2>/dev/null | head -n1 || true)
+          msi_sig=$(ls release-artefacts/*.msi.zip.sig 2>/dev/null | head -n1 || true)
+          msi_zip_name=$(basename "$msi_zip" 2>/dev/null || echo "")
+          echo "msi_zip_path=$msi_zip" >> "$GITHUB_OUTPUT"
+          echo "msi_sig_path=$msi_sig" >> "$GITHUB_OUTPUT"
+          echo "msi_zip_name=$msi_zip_name" >> "$GITHUB_OUTPUT"
+
+      - name: Generate updater manifest (latest.json)
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.tag.outputs.value }}
+          REPO: ${{ github.repository }}
+          MSI_ZIP_NAME: ${{ steps.collect.outputs.msi_zip_name }}
+          MSI_SIG_PATH: ${{ steps.collect.outputs.msi_sig_path }}
+        run: |
+          set -euo pipefail
+          if [ -z "$MSI_ZIP_NAME" ] || [ -z "$MSI_SIG_PATH" ]; then
+            echo "ERROR: signed MSI zip or its .sig was not produced by tauri build" >&2
+            exit 1
+          fi
+          node - <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+
+          const tag = process.env.RELEASE_TAG;
+          const repo = process.env.REPO;
+          const msiZipName = process.env.MSI_ZIP_NAME;
+          const msiSigPath = process.env.MSI_SIG_PATH;
+
+          const signature = fs.readFileSync(msiSigPath, 'utf8').trim();
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const version = tag || `v${pkg.version}`;
+          const url = `https://github.com/${repo}/releases/download/${tag}/${msiZipName}`;
+
+          const manifest = {
+            version,
+            notes: 'See the release page for notes.',
+            pub_date: new Date().toISOString(),
+            platforms: {
+              'windows-x86_64': {
+                signature,
+                url,
+              },
+            },
+          };
+
+          fs.writeFileSync(
+            path.join('release-artefacts', 'latest.json'),
+            JSON.stringify(manifest, null, 2) + '\n',
+          );
+          NODE
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.value }}
+          name: ${{ steps.tag.outputs.value }}
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true
+          files: |
+            release-artefacts/*.msi
+            release-artefacts/*.msi.zip
+            release-artefacts/*.msi.zip.sig
+            release-artefacts/*.exe
+            release-artefacts/*.nsis.zip
+            release-artefacts/*.nsis.zip.sig
+            release-artefacts/latest.json
