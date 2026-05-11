@@ -52,7 +52,13 @@ def _build_kill_event(row: Any, round_num: int) -> dict[str, Any]:
     victim_name = _get_col(row, "user_name", "victim_name") or ""
     victim_steamid = str(_get_col(row, "user_steamid", "victim_steamid") or "")
     weapon = _get_col(row, "weapon") or ""
-    headshot = bool(_get_col(row, "headshot") or False)
+    # Newer demoparser2 versions expose hitgroup (1 == head) instead of a
+    # boolean headshot column; accept either.
+    headshot_raw = _get_col(row, "headshot", "hitgroup")
+    if isinstance(headshot_raw, bool):
+        headshot = headshot_raw
+    else:
+        headshot = headshot_raw == 1
     tick = int(_get_col(row, "tick") or 0)
 
     suicide = (
