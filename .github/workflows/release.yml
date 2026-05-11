@@ -65,7 +65,9 @@ jobs:
           cache-dependency-path: analyzer/requirements.txt
 
       - name: Install Python analyzer dependencies
-        run: pip install -r analyzer/requirements.txt
+        run: |
+          pip install -r analyzer/requirements.txt
+          pip install "pyinstaller>=6.3.0"
 
       - name: Ensure sidecar output directory exists
         shell: bash
