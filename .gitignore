@@ -10,9 +10,22 @@ Thumbs.db
 *.iml
 
 # --- Environment / secrets ---
+# Per project policy: no plaintext secrets in git. Encrypt with git-crypt
+# or SOPS if any sensitive file ever needs to be tracked.
 .env
 .env.*
 !.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+secrets/
+.secrets/
+# Tauri signing private keys live here by default
+.tauri/
+# GitHub OAuth / API tokens
+.github_token
+.gh_token
 
 # --- Node / frontend ---
 node_modules/
