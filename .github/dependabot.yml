@@ -1,38 +1,82 @@
 version: 2
 
+# All updates group into one PR per ecosystem per week and skip semver-major
+# bumps. Majors land manually as part of milestone planning so we can audit
+# breaking changes (typescript 5 to 6, vite-plugin-react 4 to 5, etc.).
 updates:
   - package-ecosystem: npm
     directory: "/"
     schedule:
       interval: weekly
+      day: monday
     target-branch: dev
     open-pull-requests-limit: 5
     labels:
       - dependencies
+    groups:
+      npm-runtime:
+        dependency-type: "production"
+        update-types:
+          - "minor"
+          - "patch"
+      npm-dev:
+        dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: cargo
     directory: "/src-tauri"
     schedule:
       interval: weekly
+      day: monday
     target-branch: dev
     open-pull-requests-limit: 5
     labels:
       - dependencies
+    groups:
+      cargo-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
       interval: weekly
+      day: monday
     target-branch: dev
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
     labels:
       - dependencies
+    groups:
+      actions:
+        patterns:
+          - "*"
 
   - package-ecosystem: pip
     directory: "/analyzer"
     schedule:
       interval: weekly
+      day: monday
     target-branch: dev
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
     labels:
       - dependencies
+    groups:
+      pip-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
