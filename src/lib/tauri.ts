@@ -227,7 +227,7 @@ export async function analyzeDemo(args: AnalyzeDemoArgs): Promise<string> {
 
 export async function cancelAnalysis(jobId: string): Promise<void> {
   if (isTauri()) {
-    await tauriInvoke<void>("cancel_analysis", { jobId });
+    await tauriInvoke<void>("cancel_analysis", { job_id: jobId });
     return;
   }
   cancelStubJob(jobId);
@@ -253,6 +253,23 @@ export function onAnalysisEvent(
   handlers: AnalysisEventHandlers,
 ): () => void {
   const unsubs: Array<UnlistenFn | (() => void)> = [];
+  let aborted = false;
+
+  // If the caller unsubscribes before tauriListen resolves, immediately
+  // unlisten the late-arriving handle so it doesn't leak into the next job.
+  const trackAsync = (p: Promise<UnlistenFn>) => {
+    void p.then((u) => {
+      if (aborted) {
+        try {
+          u();
+        } catch {
+          /* noop */
+        }
+      } else {
+        unsubs.push(u);
+      }
+    });
+  };
 
   const wireProgress = (payload: AnalysisProgress) => {
     if (payload.job_id !== jobId) return;
@@ -268,15 +285,21 @@ export function onAnalysisEvent(
   };
 
   if (isTauri()) {
-    void tauriListen<AnalysisProgress>("analysis:progress", (e) =>
-      wireProgress(e.payload),
-    ).then((u) => unsubs.push(u));
-    void tauriListen<AnalysisResult>("analysis:result", (e) =>
-      wireResult(e.payload),
-    ).then((u) => unsubs.push(u));
-    void tauriListen<AnalysisError>("analysis:error", (e) =>
-      wireError(e.payload),
-    ).then((u) => unsubs.push(u));
+    trackAsync(
+      tauriListen<AnalysisProgress>("analysis:progress", (e) =>
+        wireProgress(e.payload),
+      ),
+    );
+    trackAsync(
+      tauriListen<AnalysisResult>("analysis:result", (e) =>
+        wireResult(e.payload),
+      ),
+    );
+    trackAsync(
+      tauriListen<AnalysisError>("analysis:error", (e) =>
+        wireError(e.payload),
+      ),
+    );
   } else {
     unsubs.push(
       listenStub("analysis:progress", (p) =>
@@ -292,6 +315,7 @@ export function onAnalysisEvent(
   }
 
   return () => {
+    aborted = true;
     for (const u of unsubs) {
       try {
         u();

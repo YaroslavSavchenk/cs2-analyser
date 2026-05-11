@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::process::Stdio;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex as StdMutex};
 
 use anyhow::{anyhow, Context, Result};
 use serde::Serialize;
@@ -21,6 +22,10 @@ struct AnalysisError {
 #[derive(Default)]
 pub struct SidecarManager {
     children: Arc<Mutex<HashMap<String, Child>>>,
+    // Per-job flag set whenever a terminal event (result, error, cancelled)
+    // is emitted. The post-wait block uses this to suppress a duplicate
+    // sidecar_crashed when Python self-reports an error and exits 1.
+    terminal_flags: Arc<StdMutex<HashMap<String, Arc<AtomicBool>>>>,
 }
 
 impl SidecarManager {
@@ -36,12 +41,49 @@ impl SidecarManager {
         self.children.lock().await.remove(job_id)
     }
 
+    pub fn register_terminal_flag(&self, job_id: &str) {
+        let mut map = self.terminal_flags.lock().expect("terminal_flags poisoned");
+        map.entry(job_id.to_string())
+            .or_insert_with(|| Arc::new(AtomicBool::new(false)));
+    }
+
+    pub fn mark_terminal(&self, job_id: &str) {
+        if let Some(flag) = self
+            .terminal_flags
+            .lock()
+            .expect("terminal_flags poisoned")
+            .get(job_id)
+        {
+            flag.store(true, Ordering::SeqCst);
+        }
+    }
+
+    pub fn is_terminal(&self, job_id: &str) -> bool {
+        self.terminal_flags
+            .lock()
+            .expect("terminal_flags poisoned")
+            .get(job_id)
+            .map(|f| f.load(Ordering::SeqCst))
+            .unwrap_or(false)
+    }
+
+    pub fn forget(&self, job_id: &str) {
+        self.terminal_flags
+            .lock()
+            .expect("terminal_flags poisoned")
+            .remove(job_id);
+    }
+
     pub async fn kill(&self, job_id: &str) -> Result<bool> {
         let mut guard = self.children.lock().await;
         if let Some(mut child) = guard.remove(job_id) {
             child
                 .start_kill()
                 .with_context(|| format!("failed to kill sidecar for job {job_id}"))?;
+            // Release the lock before awaiting so the stdout task can make
+            // progress, then reap to avoid a zombie on Windows.
+            drop(guard);
+            let _ = child.wait().await;
             Ok(true)
         } else {
             Ok(false)
@@ -54,7 +96,13 @@ impl SidecarManager {
             if let Err(e) = child.start_kill() {
                 warn!(job_id = %job_id, error = %e, "failed to kill sidecar on shutdown");
             }
+            // Best-effort reap; we're shutting down anyway.
+            let _ = child.wait().await;
         }
+        self.terminal_flags
+            .lock()
+            .expect("terminal_flags poisoned")
+            .clear();
     }
 }
 
@@ -98,6 +146,7 @@ pub async fn spawn_analyzer(
         .ok_or_else(|| anyhow!("sidecar stderr was not captured"))?;
 
     let manager_state = app.state::<SidecarManager>();
+    manager_state.register_terminal_flag(&job_id);
     manager_state.insert(job_id.clone(), child).await;
 
     let app_for_stdout = app.clone();
@@ -116,7 +165,7 @@ pub async fn spawn_analyzer(
                 Ok(None) => break,
                 Err(e) => {
                     error!(job_id = %job_id_for_stdout, error = %e, "sidecar stdout read error");
-                    emit_error(
+                    emit_terminal_error(
                         &app_for_stdout,
                         &job_id_for_stdout,
                         "sidecar_crashed",
@@ -138,19 +187,33 @@ pub async fn spawn_analyzer(
                     debug!(job_id = %job_id_for_stdout, "sidecar exited cleanly");
                 }
                 Ok(status) => {
-                    warn!(job_id = %job_id_for_stdout, code = ?status.code(), "sidecar exited with non-zero status");
-                    emit_error(
-                        &app_for_stdout,
-                        &job_id_for_stdout,
-                        "sidecar_crashed",
-                        &format!("sidecar exited with status {:?}", status.code()),
-                    );
+                    // Suppress a duplicate sidecar_crashed when the Python side
+                    // already emitted a terminal error/result and exited non-zero.
+                    if app_for_stdout
+                        .state::<SidecarManager>()
+                        .is_terminal(&job_id_for_stdout)
+                    {
+                        debug!(job_id = %job_id_for_stdout, code = ?status.code(), "sidecar exited non-zero after terminal event");
+                    } else {
+                        warn!(job_id = %job_id_for_stdout, code = ?status.code(), "sidecar exited with non-zero status");
+                        emit_terminal_error(
+                            &app_for_stdout,
+                            &job_id_for_stdout,
+                            "sidecar_crashed",
+                            &format!("sidecar exited with status {:?}", status.code()),
+                        );
+                    }
                 }
                 Err(e) => {
                     error!(job_id = %job_id_for_stdout, error = %e, "failed to await sidecar exit");
                 }
             }
         }
+
+        // Clean up the terminal flag for this job.
+        app_for_stdout
+            .state::<SidecarManager>()
+            .forget(&job_id_for_stdout);
     });
 
     let job_id_for_stderr = job_id.clone();
@@ -178,7 +241,7 @@ fn handle_sidecar_line(app: &AppHandle, job_id: &str, line: &str) {
 
     match event_kind {
         "progress" => emit_progress(app, job_id, &value),
-        "result" => emit_result(app, job_id, &value),
+        "result" => emit_terminal_result(app, job_id, &value),
         "error" => {
             let kind = value
                 .get("kind")
@@ -188,7 +251,7 @@ fn handle_sidecar_line(app: &AppHandle, job_id: &str, line: &str) {
                 .get("message")
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown error");
-            emit_error(app, job_id, kind, message);
+            emit_terminal_error(app, job_id, kind, message);
         }
         other => {
             warn!(job_id = %job_id, event = %other, "unknown sidecar event kind");
@@ -207,7 +270,10 @@ fn emit_progress(app: &AppHandle, job_id: &str, value: &Value) {
     }
 }
 
-fn emit_result(app: &AppHandle, job_id: &str, value: &Value) {
+fn emit_terminal_result(app: &AppHandle, job_id: &str, value: &Value) {
+    // Mark terminal BEFORE emitting so the post-wait race observes the flag.
+    app.state::<SidecarManager>().mark_terminal(job_id);
+
     let mut payload = value.clone();
     if let Some(obj) = payload.as_object_mut() {
         obj.remove("event");
@@ -220,7 +286,9 @@ fn emit_result(app: &AppHandle, job_id: &str, value: &Value) {
     }
 }
 
-fn emit_error(app: &AppHandle, job_id: &str, kind: &str, message: &str) {
+fn emit_terminal_error(app: &AppHandle, job_id: &str, kind: &str, message: &str) {
+    app.state::<SidecarManager>().mark_terminal(job_id);
+
     let payload = AnalysisError {
         job_id: job_id.to_string(),
         kind: kind.to_string(),
@@ -233,9 +301,12 @@ fn emit_error(app: &AppHandle, job_id: &str, kind: &str, message: &str) {
 
 pub async fn cancel(app: &AppHandle, job_id: &str) -> Result<()> {
     let manager = app.state::<SidecarManager>();
+    // Set terminal first so the stdout-task's post-wait block doesn't
+    // race with us and emit sidecar_crashed.
+    manager.mark_terminal(job_id);
     let killed = manager.kill(job_id).await?;
     if killed {
-        emit_error(app, job_id, "cancelled", "analysis cancelled by user");
+        emit_terminal_error(app, job_id, "cancelled", "analysis cancelled by user");
         Ok(())
     } else {
         Err(anyhow!("no running job with id {job_id}"))
