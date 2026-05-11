@@ -257,20 +257,25 @@ type HeroModelProps = {
   className?: string;
 };
 
+let _webglProbeCache: boolean | null = null;
+function detectWebgl(): boolean {
+  if (_webglProbeCache !== null) return _webglProbeCache;
+  if (typeof document === "undefined") return (_webglProbeCache = false);
+  try {
+    const canvas = document.createElement("canvas");
+    const gl =
+      canvas.getContext("webgl2") ||
+      canvas.getContext("webgl") ||
+      canvas.getContext("experimental-webgl");
+    _webglProbeCache = !!gl;
+  } catch {
+    _webglProbeCache = false;
+  }
+  return _webglProbeCache;
+}
+
 export function HeroModel({ className }: HeroModelProps) {
-  const [webglOk, setWebglOk] = useState<boolean>(() => {
-    if (typeof document === "undefined") return false;
-    try {
-      const canvas = document.createElement("canvas");
-      const gl =
-        canvas.getContext("webgl2") ||
-        canvas.getContext("webgl") ||
-        canvas.getContext("experimental-webgl");
-      return !!gl;
-    } catch {
-      return false;
-    }
-  });
+  const [webglOk, setWebglOk] = useState<boolean>(detectWebgl);
 
   if (!webglOk) {
     return (

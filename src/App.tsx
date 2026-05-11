@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import {
   FileSearch,
   RotateCcw,
@@ -19,12 +19,17 @@ import { Button } from "./components/ui/Button";
 import { Badge } from "./components/ui/Badge";
 import { Progress } from "./components/ui/Progress";
 import { Card, CardHeader, CardTitle, CardBody } from "./components/ui/Card";
-import { HeroModel } from "./components/HeroModel";
 import { ModeSelector } from "./components/ModeSelector";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { ResultsList } from "./components/ResultsList";
 import { cn } from "./lib/utils";
+
+// Lazy-load the three.js hero so the welcome shell paints before the
+// ~600 KB three chunk parses.
+const HeroModel = lazy(() =>
+  import("./components/HeroModel").then((m) => ({ default: m.HeroModel })),
+);
 
 const STAGE_LABEL: Record<AnalysisStage, string> = {
   parsing: "Parsing demo",
@@ -115,7 +120,9 @@ function WelcomeState({
           </Badge>
         </div>
         <div className="absolute inset-0">
-          <HeroModel className="h-full w-full" />
+          <Suspense fallback={<div className="h-full w-full" aria-hidden="true" />}>
+            <HeroModel className="h-full w-full" />
+          </Suspense>
         </div>
         <div
           className={cn(
