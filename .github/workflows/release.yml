@@ -89,12 +89,18 @@ jobs:
           RELEASE_TAG: ${{ steps.tag.outputs.value }}
         run: |
           set -euo pipefail
+          shopt -s nullglob
           mkdir -p release-artefacts
           bundle_root="src-tauri/target/release/bundle"
-          # Tauri 2.x with bundle.createUpdaterArtifacts: true produces the
-          # NSIS updater archive (.nsis.zip) on Windows; the MSI is shipped
-          # as a one-time installer only, no .msi.zip. Globs are best-effort.
-          shopt -s nullglob
+
+          echo "--- bundle/msi/ ---"
+          ls -la "$bundle_root"/msi/ 2>&1 || true
+          echo "--- bundle/nsis/ ---"
+          ls -la "$bundle_root"/nsis/ 2>&1 || true
+
+          # Tauri 2.x with bundle.createUpdaterArtifacts: true AND "updater"
+          # in bundle.targets produces the NSIS updater archive (.nsis.zip)
+          # alongside the regular .exe installer.
           for f in \
             "$bundle_root"/msi/*.msi \
             "$bundle_root"/nsis/*.exe \
@@ -104,10 +110,20 @@ jobs:
           done
           echo "--- release-artefacts/ ---"
           ls -la release-artefacts/
-          # The updater consumes the signed NSIS zip + its .sig.
-          nsis_zip=$(ls release-artefacts/*.nsis.zip 2>/dev/null | head -n1 || true)
-          nsis_sig=$(ls release-artefacts/*.nsis.zip.sig 2>/dev/null | head -n1 || true)
-          nsis_zip_name=$(basename "$nsis_zip" 2>/dev/null || echo "")
+
+          # Resolve the updater archive using bash array expansion (NOT `ls`)
+          # so that nullglob produces an empty array — never a fallback to
+          # listing the working directory.
+          nsis_zips=(release-artefacts/*.nsis.zip)
+          nsis_sigs=(release-artefacts/*.nsis.zip.sig)
+          nsis_zip="${nsis_zips[0]-}"
+          nsis_sig="${nsis_sigs[0]-}"
+          if [ -z "$nsis_zip" ] || [ -z "$nsis_sig" ]; then
+            echo "ERROR: NSIS updater archive (.nsis.zip + .sig) was not produced by tauri build." >&2
+            echo "Confirm bundle.createUpdaterArtifacts is true AND 'updater' is in bundle.targets." >&2
+            exit 1
+          fi
+          nsis_zip_name="${nsis_zip##*/}"
           echo "updater_archive_path=$nsis_zip" >> "$GITHUB_OUTPUT"
           echo "updater_sig_path=$nsis_sig" >> "$GITHUB_OUTPUT"
           echo "updater_archive_name=$nsis_zip_name" >> "$GITHUB_OUTPUT"
