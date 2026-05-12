@@ -98,47 +98,47 @@ jobs:
           echo "--- bundle/nsis/ ---"
           ls -la "$bundle_root"/nsis/ 2>&1 || true
 
-          # Tauri 2.x with bundle.createUpdaterArtifacts: true AND "updater"
-          # in bundle.targets produces the NSIS updater archive (.nsis.zip)
-          # alongside the regular .exe installer.
+          # Tauri 2.x with bundle.createUpdaterArtifacts: true signs the
+          # installers in place: bundle/nsis/*.exe + *.exe.sig and
+          # bundle/msi/*.msi + *.msi.sig. There is no .nsis.zip wrapper —
+          # the v2 updater consumes the .exe directly (magic-byte sniffed).
           for f in \
             "$bundle_root"/msi/*.msi \
             "$bundle_root"/nsis/*.exe \
-            "$bundle_root"/nsis/*.nsis.zip \
-            "$bundle_root"/nsis/*.nsis.zip.sig ; do
+            "$bundle_root"/nsis/*.exe.sig ; do
             cp "$f" release-artefacts/
           done
           echo "--- release-artefacts/ ---"
           ls -la release-artefacts/
 
-          # Resolve the updater archive using bash array expansion (NOT `ls`)
-          # so that nullglob produces an empty array — never a fallback to
-          # listing the working directory.
-          nsis_zips=(release-artefacts/*.nsis.zip)
-          nsis_sigs=(release-artefacts/*.nsis.zip.sig)
-          nsis_zip="${nsis_zips[0]-}"
+          # Resolve the NSIS installer + its .sig using bash array expansion
+          # (NOT `ls`) so nullglob produces an empty array — never a fallback
+          # to listing the working directory.
+          nsis_exes=(release-artefacts/*.exe)
+          nsis_sigs=(release-artefacts/*.exe.sig)
+          nsis_exe="${nsis_exes[0]-}"
           nsis_sig="${nsis_sigs[0]-}"
-          if [ -z "$nsis_zip" ] || [ -z "$nsis_sig" ]; then
-            echo "ERROR: NSIS updater archive (.nsis.zip + .sig) was not produced by tauri build." >&2
-            echo "Confirm bundle.createUpdaterArtifacts is true AND 'updater' is in bundle.targets." >&2
+          if [ -z "$nsis_exe" ] || [ -z "$nsis_sig" ]; then
+            echo "ERROR: NSIS installer (.exe + .exe.sig) was not produced by tauri build." >&2
+            echo "Confirm bundle.createUpdaterArtifacts is true and 'nsis' is in bundle.targets." >&2
             exit 1
           fi
-          nsis_zip_name="${nsis_zip##*/}"
-          echo "updater_archive_path=$nsis_zip" >> "$GITHUB_OUTPUT"
+          nsis_exe_name="${nsis_exe##*/}"
+          echo "updater_installer_path=$nsis_exe" >> "$GITHUB_OUTPUT"
           echo "updater_sig_path=$nsis_sig" >> "$GITHUB_OUTPUT"
-          echo "updater_archive_name=$nsis_zip_name" >> "$GITHUB_OUTPUT"
+          echo "updater_installer_name=$nsis_exe_name" >> "$GITHUB_OUTPUT"
 
       - name: Generate updater manifest (latest.json)
         shell: bash
         env:
           RELEASE_TAG: ${{ steps.tag.outputs.value }}
           REPO: ${{ github.repository }}
-          UPDATER_ARCHIVE_NAME: ${{ steps.collect.outputs.updater_archive_name }}
+          UPDATER_INSTALLER_NAME: ${{ steps.collect.outputs.updater_installer_name }}
           UPDATER_SIG_PATH: ${{ steps.collect.outputs.updater_sig_path }}
         run: |
           set -euo pipefail
-          if [ -z "$UPDATER_ARCHIVE_NAME" ] || [ -z "$UPDATER_SIG_PATH" ]; then
-            echo "ERROR: NSIS updater archive (.nsis.zip) or its .sig was not produced by tauri build." >&2
+          if [ -z "$UPDATER_INSTALLER_NAME" ] || [ -z "$UPDATER_SIG_PATH" ]; then
+            echo "ERROR: NSIS installer (.exe) or its .sig was not produced by tauri build." >&2
             echo "Confirm bundle.createUpdaterArtifacts is true in tauri config." >&2
             exit 1
           fi
@@ -148,13 +148,13 @@ jobs:
 
           const tag = process.env.RELEASE_TAG;
           const repo = process.env.REPO;
-          const archiveName = process.env.UPDATER_ARCHIVE_NAME;
+          const installerName = process.env.UPDATER_INSTALLER_NAME;
           const sigPath = process.env.UPDATER_SIG_PATH;
 
           const signature = fs.readFileSync(sigPath, 'utf8').trim();
           const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
           const version = tag || `v${pkg.version}`;
-          const url = `https://github.com/${repo}/releases/download/${tag}/${encodeURIComponent(archiveName)}`;
+          const url = `https://github.com/${repo}/releases/download/${tag}/${encodeURIComponent(installerName)}`;
 
           const manifest = {
             version,
@@ -172,7 +172,7 @@ jobs:
             path.join('release-artefacts', 'latest.json'),
             JSON.stringify(manifest, null, 2) + '\n',
           );
-          console.log('manifest written for', version, '->', archiveName);
+          console.log('manifest written for', version, '->', installerName);
           NODE
 
       - name: Publish GitHub Release
@@ -186,6 +186,4 @@ jobs:
           files: |
             release-artefacts/*.msi
             release-artefacts/*.exe
-            release-artefacts/*.nsis.zip
-            release-artefacts/*.nsis.zip.sig
             release-artefacts/latest.json
