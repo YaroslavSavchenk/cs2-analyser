@@ -102,11 +102,16 @@ jobs:
           # installers in place: bundle/nsis/*.exe + *.exe.sig and
           # bundle/msi/*.msi + *.msi.sig. There is no .nsis.zip wrapper —
           # the v2 updater consumes the .exe directly (magic-byte sniffed).
+          #
+          # Rename spaces to dots while copying — GitHub's release-upload
+          # normalises asset names the same way ("CS2 Analyser..." becomes
+          # "CS2.Analyser..."), and we need the local filename to match the
+          # public asset name so the updater URL in latest.json resolves.
           for f in \
             "$bundle_root"/msi/*.msi \
             "$bundle_root"/nsis/*.exe \
             "$bundle_root"/nsis/*.exe.sig ; do
-            cp "$f" release-artefacts/
+            cp "$f" "release-artefacts/$(basename "$f" | tr ' ' '.')"
           done
           echo "--- release-artefacts/ ---"
           ls -la release-artefacts/
